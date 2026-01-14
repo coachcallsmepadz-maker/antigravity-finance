@@ -14,14 +14,20 @@ import clsx from 'clsx';
 import { useApp, CONNECTION_STATES } from '../../context/AppContext';
 
 const DEMO_BANKS = [
+  // Australian Banks
+  { id: 'nab', name: 'NAB', logo: '🔴', color: '#C8102E' },
+  { id: 'commbank', name: 'Commonwealth Bank', logo: '🟡', color: '#FFCC00' },
+  { id: 'anz', name: 'ANZ', logo: '🔵', color: '#007DBA' },
+  { id: 'westpac', name: 'Westpac', logo: '🔴', color: '#D5002B' },
+  { id: 'macquarie', name: 'Macquarie Bank', logo: '⚫', color: '#000000' },
+  { id: 'ing', name: 'ING Australia', logo: '🟠', color: '#FF6200' },
+  { id: 'bendigo', name: 'Bendigo Bank', logo: '🟤', color: '#8B0000' },
+  { id: 'suncorp', name: 'Suncorp', logo: '🟢', color: '#008751' },
+  // US Banks
   { id: 'chase', name: 'Chase', logo: '🏦', color: '#117ACA' },
   { id: 'bofa', name: 'Bank of America', logo: '🏛️', color: '#012169' },
   { id: 'wells', name: 'Wells Fargo', logo: '🐴', color: '#D71E28' },
   { id: 'citi', name: 'Citibank', logo: '🌐', color: '#056DAE' },
-  { id: 'capital', name: 'Capital One', logo: '💳', color: '#004879' },
-  { id: 'usbank', name: 'US Bank', logo: '🇺🇸', color: '#0060A9' },
-  { id: 'pnc', name: 'PNC Bank', logo: '🏢', color: '#FF6600' },
-  { id: 'td', name: 'TD Bank', logo: '🍀', color: '#34A853' },
 ];
 
 const FLOW_STEPS = {
