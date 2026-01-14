@@ -11,9 +11,18 @@ import {
   signInAnonymousUser,
   onAuthChange,
   saveTransactions,
-  getTransactions,
+  getTransactions as getFirebaseTransactions,
   isFirebaseConfigured
 } from '../services/firebase';
+import {
+  createBasiqUser,
+  getBasiqAuthLink,
+  getConnections,
+  getAccounts,
+  getTransactions as getBasiqTransactions,
+  transformBasiqTransactions,
+  openBasiqConsentUI
+} from '../services/basiq';
 
 const AppContext = createContext(null);
 
@@ -24,10 +33,20 @@ export const CONNECTION_STATES = {
   CONNECTED: 'connected',
 };
 
+// Check if Basiq is configured
+const isBasiqConfigured = () => {
+  return import.meta.env.VITE_BASIQ_ENABLED === 'true';
+};
+
 export function AppProvider({ children }) {
   // Connection state
   const [connectionState, setConnectionState] = useState(CONNECTION_STATES.DISCONNECTED);
   const [linkedBank, setLinkedBank] = useState(null);
+
+  // Basiq state
+  const [basiqUserId, setBasiqUserId] = useState(() =>
+    localStorage.getItem('basiq_user_id')
+  );
 
   // Auth state
   const [user, setUser] = useState(null);
@@ -43,7 +62,8 @@ export function AppProvider({ children }) {
 
   // UI state
   const [showPredictions, setShowPredictions] = useState(false);
-  const [isPlaidModalOpen, setIsPlaidModalOpen] = useState(false);
+  const [isBankModalOpen, setIsBankModalOpen] = useState(false);
+  const [connectionError, setConnectionError] = useState(null);
 
   // Listen to auth state
   useEffect(() => {
@@ -53,6 +73,54 @@ export function AppProvider({ children }) {
     });
     return () => unsubscribe();
   }, []);
+
+  // Check for existing Basiq connection on mount
+  useEffect(() => {
+    if (basiqUserId && isBasiqConfigured()) {
+      checkExistingConnection();
+    }
+  }, [basiqUserId]);
+
+  // Check if user already has bank connections
+  const checkExistingConnection = async () => {
+    try {
+      const connections = await getConnections(basiqUserId);
+      if (connections.data && connections.data.length > 0) {
+        const connection = connections.data[0];
+        setLinkedBank({
+          id: connection.id,
+          name: connection.institution?.shortName || connection.institution?.name || 'Bank',
+          logo: '🏦',
+          accountType: 'Connected'
+        });
+        setConnectionState(CONNECTION_STATES.CONNECTED);
+        await fetchTransactions();
+      }
+    } catch (error) {
+      console.warn('No existing connection found');
+    }
+  };
+
+  // Fetch transactions from Basiq
+  const fetchTransactions = async () => {
+    if (!basiqUserId) return;
+
+    try {
+      setConnectionState(CONNECTION_STATES.SYNCING);
+      const basiqData = await getBasiqTransactions(basiqUserId);
+      const transformed = transformBasiqTransactions(basiqData);
+      setTransactions(transformed);
+      setConnectionState(CONNECTION_STATES.CONNECTED);
+
+      // Save to Firebase if configured
+      if (isFirebaseConfigured() && user) {
+        await saveTransactions(user.uid, transformed);
+      }
+    } catch (error) {
+      console.error('Failed to fetch transactions:', error);
+      setConnectionError('Failed to fetch transactions');
+    }
+  };
 
   // Process transactions when they change
   useEffect(() => {
@@ -71,27 +139,84 @@ export function AppProvider({ children }) {
     }
   }, [transactions]);
 
-  // Simulate Plaid connection flow
-  const startPlaidConnection = useCallback(() => {
-    setIsPlaidModalOpen(true);
+  // Start bank connection flow
+  const startBankConnection = useCallback(() => {
+    setIsBankModalOpen(true);
+    setConnectionError(null);
   }, []);
 
-  const completePlaidConnection = useCallback(async (bankInfo) => {
+  // Connect with Basiq (real integration)
+  const connectWithBasiq = useCallback(async (email) => {
+    try {
+      setConnectionState(CONNECTION_STATES.CONNECTING);
+      setConnectionError(null);
+
+      // Create or get Basiq user
+      let userId = basiqUserId;
+      if (!userId) {
+        const userResponse = await createBasiqUser(email);
+        userId = userResponse.id;
+        setBasiqUserId(userId);
+        localStorage.setItem('basiq_user_id', userId);
+      }
+
+      // Get client token for Consent UI
+      const { clientToken } = await getBasiqAuthLink(userId);
+
+      // Open Basiq Consent UI
+      openBasiqConsentUI(
+        clientToken,
+        async () => {
+          // On popup close, check for connections
+          setConnectionState(CONNECTION_STATES.SYNCING);
+
+          // Wait a moment for Basiq to process
+          await new Promise(resolve => setTimeout(resolve, 2000));
+
+          // Check for connections
+          const connections = await getConnections(userId);
+          if (connections.data && connections.data.length > 0) {
+            const connection = connections.data[0];
+            setLinkedBank({
+              id: connection.id,
+              name: connection.institution?.shortName || connection.institution?.name || 'Bank',
+              logo: '🏦',
+              accountType: 'Connected'
+            });
+
+            // Fetch transactions
+            await fetchTransactions();
+            setIsBankModalOpen(false);
+          } else {
+            setConnectionState(CONNECTION_STATES.DISCONNECTED);
+            setConnectionError('No bank connection was made. Please try again.');
+          }
+        },
+        (error) => {
+          setConnectionState(CONNECTION_STATES.DISCONNECTED);
+          setConnectionError(error.message);
+        }
+      );
+    } catch (error) {
+      console.error('Basiq connection failed:', error);
+      setConnectionState(CONNECTION_STATES.DISCONNECTED);
+      setConnectionError('Failed to start bank connection. Please try again.');
+    }
+  }, [basiqUserId]);
+
+  // Demo mode connection (when Basiq not configured)
+  const connectDemoMode = useCallback(async (bankInfo) => {
     setConnectionState(CONNECTION_STATES.CONNECTING);
 
-    // Simulate connection delay
     await new Promise(resolve => setTimeout(resolve, 1500));
 
     setConnectionState(CONNECTION_STATES.SYNCING);
     setLinkedBank(bankInfo);
 
-    // Generate mock data
     const mockTransactions = generateMockTransactions();
 
-    // Simulate syncing animation
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // Try to authenticate and save to Firebase
     try {
       let currentUser = user;
       if (!currentUser && isFirebaseConfigured()) {
@@ -103,16 +228,16 @@ export function AppProvider({ children }) {
         await saveTransactions(currentUser.uid, mockTransactions);
       }
     } catch (error) {
-      console.warn('Firebase save failed, using local storage:', error);
+      console.warn('Firebase save failed:', error);
     }
 
     setTransactions(mockTransactions);
     setConnectionState(CONNECTION_STATES.CONNECTED);
-    setIsPlaidModalOpen(false);
+    setIsBankModalOpen(false);
   }, [user]);
 
-  const cancelPlaidConnection = useCallback(() => {
-    setIsPlaidModalOpen(false);
+  const cancelBankConnection = useCallback(() => {
+    setIsBankModalOpen(false);
     if (connectionState === CONNECTION_STATES.CONNECTING) {
       setConnectionState(CONNECTION_STATES.DISCONNECTED);
     }
@@ -122,17 +247,28 @@ export function AppProvider({ children }) {
     setShowPredictions(prev => !prev);
   }, []);
 
+  // Refresh transactions
+  const refreshTransactions = useCallback(async () => {
+    if (basiqUserId && isBasiqConfigured()) {
+      await fetchTransactions();
+    }
+  }, [basiqUserId]);
+
   const isConnected = connectionState === CONNECTION_STATES.CONNECTED;
+  const useRealBanking = isBasiqConfigured();
 
   const value = {
     // Connection
     connectionState,
     linkedBank,
     isConnected,
+    connectionError,
+    useRealBanking,
 
     // Auth
     user,
     authLoading,
+    basiqUserId,
 
     // Data
     transactions,
@@ -144,13 +280,21 @@ export function AppProvider({ children }) {
 
     // UI State
     showPredictions,
-    isPlaidModalOpen,
+    isBankModalOpen,
 
     // Actions
-    startPlaidConnection,
-    completePlaidConnection,
-    cancelPlaidConnection,
+    startBankConnection,
+    connectWithBasiq,
+    connectDemoMode,
+    cancelBankConnection,
     togglePredictions,
+    refreshTransactions,
+
+    // Legacy aliases
+    isPlaidModalOpen: isBankModalOpen,
+    startPlaidConnection: startBankConnection,
+    completePlaidConnection: connectDemoMode,
+    cancelPlaidConnection: cancelBankConnection,
   };
 
   return (

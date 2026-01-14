@@ -3,7 +3,7 @@ import { AppProvider } from './context/AppContext';
 import { Header } from './components/layout/Header';
 import { Dashboard } from './components/layout/Dashboard';
 import { WelcomeOverlay } from './components/layout/WelcomeOverlay';
-import { PlaidLinkModal } from './components/modals/PlaidLinkModal';
+import { BankLinkModal } from './components/modals/BankLinkModal';
 
 function App() {
   return (
@@ -20,8 +20,8 @@ function App() {
           <WelcomeOverlay />
         </AnimatePresence>
 
-        {/* Plaid Link Modal */}
-        <PlaidLinkModal />
+        {/* Bank Link Modal */}
+        <BankLinkModal />
 
         {/* Footer */}
         <footer className="px-6 py-4 border-t border-carbon-700/50">
